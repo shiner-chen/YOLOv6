@@ -13,7 +13,7 @@ class Detect(nn.Module):
     With hardware-aware degisn, the decoupled head is optimized with
     hybridchannels methods.
     '''
-    def __init__(self, num_classes=80, num_layers=3, inplace=True, head_layers=None, use_dfl=True, reg_max=16):  # detection layer
+    def __init__(self, num_classes=80, num_layers=3, inplace=True, head_layers=None, use_dfl=True, reg_max=16, p2_head=False):  # detection layer
         super().__init__()
         assert head_layers is not None
         self.nc = num_classes  # number of classes
@@ -22,7 +22,12 @@ class Detect(nn.Module):
         self.grid = [torch.zeros(1)] * num_layers
         self.prior_prob = 1e-2
         self.inplace = inplace
-        stride = [8, 16, 32] if num_layers == 3 else [8, 16, 32, 64] # strides computed during build
+        if num_layers == 3:
+            stride = [8, 16, 32]
+        elif p2_head:
+            stride = [4, 8, 16, 32]   # ET-YOLOv6n P2/P3/P4/P5
+        else:
+            stride = [8, 16, 32, 64]  # P6 variant
         self.stride = torch.tensor(stride)
         self.use_dfl = use_dfl
         self.reg_max = reg_max
@@ -139,9 +144,14 @@ class Detect(nn.Module):
                 axis=-1)
 
 
-def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, num_layers=3):
+def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, num_layers=3, p2_head=False):
 
-    chx = [6, 8, 10] if num_layers == 3 else [8, 9, 10, 11]
+    if num_layers == 3:
+        chx = [6, 8, 10]
+    elif p2_head:
+        chx = [12, 6, 8, 10]  # ET-YOLOv6n: P2(/4), P3(/8), P4(/16), P5(/32)
+    else:
+        chx = [8, 9, 10, 11]  # P6 variant
 
     head_layers = nn.Sequential(
         # stem0

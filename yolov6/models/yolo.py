@@ -8,6 +8,8 @@ from yolov6.layers.common import *
 from yolov6.utils.torch_utils import initialize_weights
 from yolov6.models.efficientrep import *
 from yolov6.models.reppan import *
+from yolov6.models.efficientrep_star import EfficientRepStar
+from yolov6.models.reppan_cross import CrossTwoLevelBiFPANNeck
 from yolov6.utils.events import LOGGER
 
 
@@ -127,8 +129,11 @@ def build_network(config, channels, num_classes, num_layers, fuse_ab=False, dist
 
     else:
         from yolov6.models.effidehead import Detect, build_effidehead_layer
-        head_layers = build_effidehead_layer(channels_list, 1, num_classes, reg_max=reg_max, num_layers=num_layers)
-        head = Detect(num_classes, num_layers, head_layers=head_layers, use_dfl=use_dfl)
+        p2_head = config.model.head.get('p2_head', False)
+        head_layers = build_effidehead_layer(channels_list, 1, num_classes, reg_max=reg_max,
+                                             num_layers=num_layers, p2_head=p2_head)
+        head = Detect(num_classes, num_layers, head_layers=head_layers, use_dfl=use_dfl,
+                      p2_head=p2_head)
 
     return backbone, neck, head
 
