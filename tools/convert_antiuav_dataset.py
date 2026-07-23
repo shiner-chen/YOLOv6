@@ -79,7 +79,7 @@ def extract_split(img_zip_path, gt, out_dir, split, video_list):
     img_out.mkdir(parents=True, exist_ok=True)
     lbl_out.mkdir(parents=True, exist_ok=True)
 
-    kept = skipped = 0
+    n_pos = n_neg = 0
     with zipfile.ZipFile(img_zip_path) as zf:
         all_names = zf.namelist()
         for video in video_list:
@@ -95,27 +95,26 @@ def extract_split(img_zip_path, gt, out_dir, split, video_list):
                 print(f'  WARNING: {video}: {len(frames)} frames but {len(bboxes)} GT lines')
 
             for frame_path, bbox in zip(frames, bboxes):
-                if bbox is None:
-                    skipped += 1
-                    continue   # UAV invisible / not annotated
-
                 frame_name = Path(frame_path).name          # e.g. 00001.jpg
                 stem = Path(frame_name).stem                # 00001
                 out_stem = f'{video}_{stem}'
 
-                # write image
+                # write image (always)
                 img_data = zf.read(frame_path)
-                img_dst = img_out / f'{out_stem}.jpg'
-                img_dst.write_bytes(img_data)
+                (img_out / f'{out_stem}.jpg').write_bytes(img_data)
 
-                # write label
-                xc, yc, w, h = bbox_to_yolo(*bbox)
-                lbl_dst = lbl_out / f'{out_stem}.txt'
-                lbl_dst.write_text(f'0 {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}\n')
-                kept += 1
+                if bbox is None:
+                    # negative sample — empty label file (YOLO convention for background)
+                    (lbl_out / f'{out_stem}.txt').write_text('')
+                    n_neg += 1
+                else:
+                    xc, yc, w, h = bbox_to_yolo(*bbox)
+                    (lbl_out / f'{out_stem}.txt').write_text(
+                        f'0 {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}\n')
+                    n_pos += 1
 
-    print(f'  {split}: kept {kept} frames, skipped {skipped} invisible')
-    return kept
+    print(f'  {split}: {n_pos} positive + {n_neg} negative = {n_pos+n_neg} total frames')
+    return n_pos, n_neg
 
 
 def write_yaml(out_dir):
@@ -138,12 +137,18 @@ def main():
     print(f'  loaded GT for {len(gt)} videos')
 
     print('Extracting train split...')
-    extract_split(args.img_zip, gt, args.out_dir, 'train', TRAIN_VIDEOS)
+    tr_pos, tr_neg = extract_split(args.img_zip, gt, args.out_dir, 'train', TRAIN_VIDEOS)
 
     print('Extracting val split...')
-    extract_split(args.img_zip, gt, args.out_dir, 'val', VAL_VIDEOS)
+    va_pos, va_neg = extract_split(args.img_zip, gt, args.out_dir, 'val', VAL_VIDEOS)
 
     write_yaml(args.out_dir)
+
+    total = tr_pos + tr_neg + va_pos + va_neg
+    print(f'\nSummary:')
+    print(f'  train  pos={tr_pos}  neg={tr_neg}  ({100*tr_neg/(tr_pos+tr_neg):.1f}% neg)')
+    print(f'  val    pos={va_pos}  neg={va_neg}  ({100*va_neg/(va_pos+va_neg):.1f}% neg)')
+    print(f'  total  {total} frames')
     print('Done.')
 
 
