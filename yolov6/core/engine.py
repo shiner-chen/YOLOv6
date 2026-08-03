@@ -2,6 +2,7 @@
 # -*- coding:utf-8 -*-
 from ast import Pass
 import os
+import sys
 import time
 from copy import deepcopy
 import os.path as osp
@@ -147,7 +148,7 @@ class Trainer:
             write_tbimg(self.tblogger, self.vis_train_batch, self.step + self.max_stepnum * self.epoch, type='train')
 
         # forward
-        with amp.autocast(enabled=self.device != 'cpu'):
+        with torch.amp.autocast('cuda', enabled=self.device != 'cpu'):
             _, _, batch_height, batch_width = images.shape
             preds, s_featmaps = self.model(images)
             if self.args.distill:
@@ -188,6 +189,15 @@ class Trainer:
                 self.eval_model()
                 self.ap = self.evaluate_results[1]
                 self.best_ap = max(self.ap, self.best_ap)
+
+            # Log one-liner per epoch: losses + mAP on val epochs
+            if is_val_epoch:
+                LOGGER.info(('%10s' + ' %10.4g' * (self.loss_num + 3)) %
+                            (f'{self.epoch}/{self.max_epoch - 1}', lrs_of_this_epoch[0], *self.mean_loss,
+                             self.evaluate_results[0], self.evaluate_results[1]))
+            else:
+                LOGGER.info(('%10s' + ' %10.4g' * (self.loss_num + 1)) %
+                            (f'{self.epoch}/{self.max_epoch - 1}', lrs_of_this_epoch[0], *self.mean_loss))
             # save ckpt
             ckpt = {
                     'model': deepcopy(de_parallel(self.model)).half(),
@@ -231,7 +241,9 @@ class Trainer:
                             task='train',
                             specific_shape=self.specific_shape,
                             height=self.height,
-                            width=self.width
+                            width=self.width,
+                            verbose=True,
+                            do_pr_metric=True,
                             )
         else:
             def get_cfg_value(cfg_dict, value_str, default_value):
@@ -275,7 +287,7 @@ class Trainer:
         self.warmup_stepnum = max(round(self.cfg.solver.warmup_epochs * self.max_stepnum), 1000) if self.args.quant is False else 0
         self.scheduler.last_epoch = self.start_epoch - 1
         self.last_opt_step = -1
-        self.scaler = amp.GradScaler(enabled=self.device != 'cpu')
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.device != 'cpu')
 
         self.best_ap, self.ap = 0.0, 0.0
         self.best_stop_strong_aug_ap = 0.0

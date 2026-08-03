@@ -121,8 +121,8 @@ def write_yaml(out_dir):
     yaml_path = Path(out_dir) / 'antiuav.yaml'
     yaml_path.write_text(f"""\
 path: {out_dir}
-train: images/train
-val:   images/val
+train: {out_dir}/images/train
+val:   {out_dir}/images/val
 
 nc: 1
 names: ['uav']

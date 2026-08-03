@@ -314,7 +314,12 @@ class TrainValDataset(Dataset):
         img_paths = []
         for img_dir in img_dirs:
             assert osp.exists(img_dir), f"{img_dir} is an invalid directory path!"
-            img_paths += glob.glob(osp.join(img_dir, "**/*"), recursive=True)
+            if osp.isfile(img_dir) and img_dir.lower().endswith('.txt'):
+                # txt file containing one image path per line
+                with open(img_dir, 'r') as f:
+                    img_paths += [ln.strip() for ln in f if ln.strip()]
+            else:
+                img_paths += glob.glob(osp.join(img_dir, "**/*"), recursive=True)
 
         img_paths = sorted(
             p for p in img_paths if p.split(".")[-1].lower() in IMG_FORMATS and os.path.isfile(p)

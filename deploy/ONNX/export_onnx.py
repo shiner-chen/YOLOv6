@@ -109,7 +109,8 @@ if __name__ == '__main__':
                               input_names=['images'],
                               output_names=['num_dets', 'det_boxes', 'det_scores', 'det_classes']
                               if args.end2end else ['outputs'],
-                              dynamic_axes=dynamic_axes)
+                              dynamic_axes=dynamic_axes,
+                              dynamo=False)  # force legacy exporter (PyTorch 2.x compat)
             f.seek(0)
             # Checks
             onnx_model = onnx.load(f)  # load onnx model
