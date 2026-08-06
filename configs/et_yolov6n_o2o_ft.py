@@ -43,13 +43,13 @@ model = dict(
 solver = dict(
     optim='SGD',
     lr_scheduler='Cosine',
-    lr0=0.01,
+    lr0=0.005,          # fine-tune: O2O头从随机初始化，比全量ft1(0.0005)高一档；有效峰值~0.01
     lrf=0.01,
     momentum=0.937,
     weight_decay=0.0005,
-    warmup_epochs=3.0,
+    warmup_epochs=1.0,  # fine-tune不需要3epoch热身
     warmup_momentum=0.8,
-    warmup_bias_lr=0.1,
+    warmup_bias_lr=0.01,  # 避免第0步以0.1大幅冲击已收敛的bias
 )
 
 training_mode = 'repvgg'
@@ -65,5 +65,5 @@ data_aug = dict(
     flipud=0.5,
     fliplr=0.5,
     mosaic=1.0,
-    mixup=0.0,
+    mixup=0.05,
 )
