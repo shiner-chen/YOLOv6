@@ -2,11 +2,11 @@
 # Loads backbone+neck from the single-branch ft1 checkpoint (strict=False, name+shape match).
 # O2O head is randomly initialised and trained from scratch via ProgLoss schedule.
 #
-# ProgLoss schedule:
-#   epoch  <  50  :  λ_o2m=2.0, λ_o2o=1.0   (O2M-dominant, head warm-up)
-#   epoch  50-150 :  linear transition
-#   epoch > 150   :  λ_o2m=1.0, λ_o2o=3.0   (O2O-dominant, NMS-free quality)
-#   → use 200 epochs so the model trains ≥50 epochs in fully O2O-dominant regime.
+# ProgLoss schedule (fine-tune, epoch-budget compressed vs. scratch):
+#   epoch  <  20  :  λ_o2m=2.0, λ_o2o=1.0   (O2M-dominant, head warm-up)
+#   epoch  20- 80 :  linear transition
+#   epoch >  80   :  λ_o2m=1.0, λ_o2o=3.0   (O2O-dominant, NMS-free quality)
+#   → 100 epochs total: backbone already strong, 20 epochs O2O-dominant at end.
 
 model = dict(
     type='ETYOLOv6n_O2O',
@@ -33,8 +33,8 @@ model = dict(
         iou_type='wiou',
         use_dfl=False,
         reg_max=0,
-        prog_loss_t1=50,
-        prog_loss_t2=150,
+        prog_loss_t1=20,
+        prog_loss_t2=80,
         qat_mode=False,
         confidence_threshold=0.25,
     )
