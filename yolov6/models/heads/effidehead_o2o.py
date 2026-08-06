@@ -32,6 +32,7 @@ class Detect(nn.Module):
 
         # P2/P3/P4/P5 strides
         self.stride = torch.tensor([4, 8, 16, 32])
+        self.grid = [torch.empty(0) for _ in range(num_layers)]
         self.grid_cell_offset = 0.5
         self.grid_cell_size = 5.0
 
