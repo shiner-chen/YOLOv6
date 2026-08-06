@@ -26,6 +26,7 @@ from yolov6.models.losses.loss import ComputeLoss as ComputeLoss
 from yolov6.models.losses.loss_fuseab import ComputeLoss as ComputeLoss_ab
 from yolov6.models.losses.loss_distill import ComputeLoss as ComputeLoss_distill
 from yolov6.models.losses.loss_distill_ns import ComputeLoss as ComputeLoss_distill_ns
+from yolov6.models.losses.loss_o2o import ComputeLoss_O2O
 
 from yolov6.utils.events import LOGGER, NCOLS, load_yaml, write_tblog, write_tbimg
 from yolov6.utils.ema import ModelEMA, de_parallel
@@ -56,6 +57,7 @@ class Trainer:
         self.num_classes = self.data_dict['nc']
         # get model and optimizer
         self.distill_ns = True if self.args.distill and self.cfg.model.type in ['YOLOv6n','YOLOv6s'] else False
+        self.o2o = getattr(cfg.model.head, 'o2o', False)
         model = self.get_model(args, cfg, self.num_classes, device)
         if self.args.distill:
             if self.args.fuse_ab:
@@ -106,8 +108,12 @@ class Trainer:
         self.height = args.height
         self.width = args.width
 
-        self.loss_num = 3
-        self.loss_info = ['Epoch', 'lr', 'iou_loss', 'dfl_loss', 'cls_loss']
+        if self.o2o:
+            self.loss_num = 4
+            self.loss_info = ['Epoch', 'lr', 'iou_o2m', 'iou_o2o', 'cls_o2m', 'cls_o2o']
+        else:
+            self.loss_num = 3
+            self.loss_info = ['Epoch', 'lr', 'iou_loss', 'dfl_loss', 'cls_loss']
         if self.args.distill:
             self.loss_num += 1
             self.loss_info += ['cwd_loss']
@@ -299,13 +305,26 @@ class Trainer:
             self.best_stop_strong_aug_ap = self.evaluate_results[1]
 
 
-        self.compute_loss = ComputeLoss(num_classes=self.data_dict['nc'],
-                                        ori_img_size=self.img_size,
-                                        warmup_epoch=self.cfg.model.head.atss_warmup_epoch,
-                                        use_dfl=self.cfg.model.head.use_dfl,
-                                        reg_max=self.cfg.model.head.reg_max,
-                                        iou_type=self.cfg.model.head.iou_type,
-					                    fpn_strides=self.cfg.model.head.strides)
+        if self.o2o:
+            self.compute_loss = ComputeLoss_O2O(
+                num_classes=self.data_dict['nc'],
+                ori_img_size=self.img_size,
+                use_dfl=self.cfg.model.head.use_dfl,
+                reg_max=self.cfg.model.head.reg_max,
+                iou_type=self.cfg.model.head.iou_type,
+                fpn_strides=self.cfg.model.head.strides,
+                prog_loss_t1=getattr(self.cfg.model.head, 'prog_loss_t1', 50),
+                prog_loss_t2=getattr(self.cfg.model.head, 'prog_loss_t2', 150),
+                qat_mode=getattr(self.cfg.model.head, 'qat_mode', False),
+            )
+        else:
+            self.compute_loss = ComputeLoss(num_classes=self.data_dict['nc'],
+                                            ori_img_size=self.img_size,
+                                            warmup_epoch=self.cfg.model.head.atss_warmup_epoch,
+                                            use_dfl=self.cfg.model.head.use_dfl,
+                                            reg_max=self.cfg.model.head.reg_max,
+                                            iou_type=self.cfg.model.head.iou_type,
+                                            fpn_strides=self.cfg.model.head.strides)
 
         if self.args.fuse_ab:
             self.compute_loss_ab = ComputeLoss_ab(num_classes=self.data_dict['nc'],

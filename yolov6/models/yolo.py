@@ -127,6 +127,12 @@ def build_network(config, channels, num_classes, num_layers, fuse_ab=False, dist
         head_layers = build_effidehead_layer(channels_list, 3, num_classes, reg_max=reg_max, num_layers=num_layers)
         head = Detect(num_classes, anchors_init, num_layers, head_layers=head_layers, use_dfl=use_dfl)
 
+    elif getattr(config.model.head, 'o2o', False):
+        from yolov6.models.heads.effidehead_o2o import Detect, build_effidehead_layer
+        head_layers = build_effidehead_layer(channels_list, num_classes, num_layers=num_layers)
+        head = Detect(num_classes, num_layers, head_layers=head_layers,
+                      use_dfl=use_dfl, reg_max=reg_max)
+
     else:
         from yolov6.models.effidehead import Detect, build_effidehead_layer
         p2_head = config.model.head.get('p2_head', False)
