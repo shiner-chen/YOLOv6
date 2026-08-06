@@ -90,6 +90,19 @@ class IOUloss:
             omiga_h = torch.abs(h1 - h2) / torch.max(h1, h2)
             shape_cost = torch.pow(1 - torch.exp(-1 * omiga_w), 4) + torch.pow(1 - torch.exp(-1 * omiga_h), 4)
             iou = iou - 0.5 * (distance_cost + shape_cost)
+        elif self.iou_type == 'wiou':
+            # Wise-IoU: exp(rho^2/C^2) as detached gradient weight
+            # focuses training on hard (low-quality) examples
+            c2 = cw ** 2 + ch ** 2 + self.eps
+            rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 +
+                    (b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4
+            wise_factor = torch.exp(rho2 / c2)
+            loss = (1.0 - iou) * wise_factor.detach()
+            if self.reduction == 'sum':
+                return loss.sum()
+            elif self.reduction == 'mean':
+                return loss.mean()
+            return loss
         loss = 1.0 - iou
 
         if self.reduction == 'sum':
