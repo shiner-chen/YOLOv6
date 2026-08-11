@@ -78,7 +78,7 @@ def disable_cls_o2o_quantization(model):
     Keeping them FP16 avoids discretization rounding errors that could flip
     foreground/background classification at INT8 precision.
     """
-    from yolov6.utils.general import de_parallel
+    from yolov6.utils.ema import de_parallel
     detect = de_parallel(model).detect
 
     disabled = 0
@@ -96,20 +96,26 @@ def disable_cls_o2o_quantization(model):
     return model
 
 
-def calibrate_quantizers(model, dataloader, device, num_batches=200):
+def calibrate_quantizers(model, dataloader, device, num_batches=200,
+                         amax_method='entropy', amax_percentile=99.99):
     """Run PTQ histogram calibration before QAT fine-tuning.
 
     Calibration gives quantizers a good initial scale before gradient
     updates begin; without it QAT can diverge in early epochs.
+
+    Args:
+        amax_method: passed to HistogramCalibrator.compute_amax() as 'method'
+                     ('entropy', 'percentile', or 'mse').
+        amax_percentile: used when amax_method='percentile'.
     """
     try:
         from pytorch_quantization import nn as quant_nn
-        from pytorch_quantization.calib import MaxCalibrator
+        from pytorch_quantization.calib import HistogramCalibrator
     except ImportError:
         LOGGER.warning('pytorch-quantization not available — skipping calibration')
         return
 
-    LOGGER.info(f'Calibrating quantizers on {num_batches} batches...')
+    LOGGER.info(f'Calibrating quantizers on {num_batches} batches (method={amax_method})...')
 
     # Enable calibration mode
     for name, module in model.named_modules():
@@ -119,17 +125,21 @@ def calibrate_quantizers(model, dataloader, device, num_batches=200):
 
     model.eval()
     with torch.no_grad():
-        for i, (images, _) in enumerate(dataloader):
+        for i, (images, *_) in enumerate(dataloader):
             if i >= num_batches:
                 break
             images = images.to(device, non_blocking=True).float() / 255.0
             model(images)
 
-    # Load calibrated scales back
+    # Load calibrated scales back; HistogramCalibrator.compute_amax requires
+    # method as a positional arg — MaxCalibrator takes no extra args.
     for name, module in model.named_modules():
         if isinstance(module, quant_nn.TensorQuantizer):
             if module._calibrator is not None:
-                module.load_calib_amax()
+                if isinstance(module._calibrator, HistogramCalibrator):
+                    module.load_calib_amax(amax_method, percentile=amax_percentile, strict=False)
+                else:
+                    module.load_calib_amax(strict=False)
             module.enable_quant()
             module.disable_calib()
 
@@ -257,7 +267,11 @@ def main(args):
                 trainer.train_loader,
                 device,
                 num_batches=args.calib_batches,
+                amax_method=getattr(cfg.ptq, 'histogram_amax_method', 'entropy'),
+                amax_percentile=getattr(cfg.ptq, 'histogram_amax_percentile', 99.99),
             )
+            # Move amax tensors to GPU after calibration
+            trainer.model.to(device)
 
     # ---- QAT fine-tuning ----
     LOGGER.info(

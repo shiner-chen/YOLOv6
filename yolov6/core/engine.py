@@ -611,15 +611,19 @@ class Trainer:
         if self.args.quant:
             from tools.qat.qat_utils import qat_init_model_manu, skip_sensitive_layers
             qat_init_model_manu(model, cfg, self.args)
-            # workaround
-            model.neck.upsample_enable_quant(cfg.ptq.num_bits, cfg.ptq.calib_method)
-            # if self.main_process:
-            #     print(model)
-            # QAT
+            # workaround: some necks (e.g. RepBiFPANNeck) expose upsample_enable_quant;
+            # custom necks (e.g. CrossTwoLevelBiFPANNeck) skip this step gracefully.
+            if hasattr(model.neck, 'upsample_enable_quant'):
+                model.neck.upsample_enable_quant(cfg.ptq.num_bits, cfg.ptq.calib_method)
+            # QAT flow: load calibrated model only when cfg.qat.calib_pt is provided.
+            # qat_train.py performs inline PTQ calibration instead, so this block is
+            # intentionally skipped when cfg.qat is absent or calib_pt is None.
             if self.args.calib is False:
-                if cfg.qat.sensitive_layers_skip:
-                    skip_sensitive_layers(model, cfg.qat.sensitive_layers_list)
-                # QAT flow load calibrated model
-                assert cfg.qat.calib_pt is not None, 'Please provide calibrated model'
-                model.load_state_dict(torch.load(cfg.qat.calib_pt)['model'].float().state_dict())
+                qat_cfg = getattr(cfg, 'qat', None)
+                if qat_cfg is not None and getattr(qat_cfg, 'calib_pt', None) is not None:
+                    if getattr(qat_cfg, 'sensitive_layers_skip', False):
+                        skip_sensitive_layers(model, qat_cfg.sensitive_layers_list)
+                    model.load_state_dict(
+                        torch.load(qat_cfg.calib_pt)['model'].float().state_dict()
+                    )
             model.to(device)

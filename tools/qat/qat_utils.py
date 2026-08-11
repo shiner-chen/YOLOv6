@@ -86,11 +86,18 @@ def qat_init_model_manu(model, cfg, args):
             kernel_size = m.kernel_size
             stride = m.stride
             padding = m.padding
+            dilation = m.dilation
+            groups = m.groups
+            padding_mode = m.padding_mode
             quant_conv = quant_nn.QuantConv2d(in_channels,
                                               out_channels,
                                               kernel_size,
                                               stride,
                                               padding,
+                                              dilation,
+                                              groups,
+                                              m.bias is not None,
+                                              padding_mode,
                                               quant_desc_input = conv2d_input_default_desc,
                                               quant_desc_weight = conv2d_weight_default_desc)
             quant_conv.weight.data.copy_(m.weight.detach())
