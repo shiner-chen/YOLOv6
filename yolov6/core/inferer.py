@@ -112,7 +112,7 @@ class Inferer:
                         class_num = int(cls)  # integer class
                         label = None if hide_labels else (self.class_names[class_num] if hide_conf else f'{self.class_names[class_num]} {conf:.2f}')
 
-                        self.plot_box_and_label(img_ori, max(round(sum(img_ori.shape) / 2 * 0.003), 2), xyxy, label, color=self.generate_colors(class_num, True))
+                        self.plot_box_and_label(img_ori, max(round(sum(img_ori.shape) / 2 * 0.003), 2), xyxy, label, color=self.generate_colors(class_num, True), font_scale_factor=0.4)
 
                 img_src = np.asarray(img_ori)
 
@@ -237,17 +237,18 @@ class Inferer:
         return text_size
 
     @staticmethod
-    def plot_box_and_label(image, lw, box, label='', color=(128, 128, 128), txt_color=(255, 255, 255), font=cv2.FONT_HERSHEY_COMPLEX):
+    def plot_box_and_label(image, lw, box, label='', color=(128, 128, 128), txt_color=(255, 255, 255), font=cv2.FONT_HERSHEY_COMPLEX, font_scale_factor=1.0):
         # Add one xyxy box to image with label
         p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
         cv2.rectangle(image, p1, p2, color, thickness=lw, lineType=cv2.LINE_AA)
         if label:
             tf = max(lw - 1, 1)  # font thickness
-            w, h = cv2.getTextSize(label, 0, fontScale=lw / 3, thickness=tf)[0]  # text width, height
+            fs = lw / 3 * font_scale_factor  # font scale, reduced by factor
+            w, h = cv2.getTextSize(label, 0, fontScale=fs, thickness=tf)[0]  # text width, height
             outside = p1[1] - h - 3 >= 0  # label fits outside box
             p2 = p1[0] + w, p1[1] - h - 3 if outside else p1[1] + h + 3
             cv2.rectangle(image, p1, p2, color, -1, cv2.LINE_AA)  # filled
-            cv2.putText(image, label, (p1[0], p1[1] - 2 if outside else p1[1] + h + 2), font, lw / 3, txt_color,
+            cv2.putText(image, label, (p1[0], p1[1] - 2 if outside else p1[1] + h + 2), font, fs, txt_color,
                         thickness=tf, lineType=cv2.LINE_AA)
 
     @staticmethod

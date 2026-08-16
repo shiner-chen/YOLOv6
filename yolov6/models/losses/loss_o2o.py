@@ -84,6 +84,7 @@ class ComputeLoss_O2O:
         confidence_threshold: float = 0.25,
         loss_weight_cls: float = 1.0,
         loss_weight_iou: float = 2.5,
+        stal_area_thr: float = 0.001,
     ):
         if fpn_strides is None:
             fpn_strides = [4, 8, 16, 32]
@@ -107,16 +108,19 @@ class ComputeLoss_O2O:
         self.cached_anchors = None
 
         # O2M assigner: topk=13, many candidates for backbone gradients
+        # stal_area_thr controls STAL boost boundary: 1.0 + gamma*exp(-area_ratio/area_thr)
+        #   roi320 (11px median): area_thr=0.001  → 5px→1.44x, 25px→1.05x
+        #   roi200→640 (93px median): area_thr=0.02 → 27px→1.35x, 93px→1.01x
         self.assigner_o2m = STALAssigner(
             topk=13, num_classes=num_classes,
             alpha=1.0, beta=6.0,
-            gamma=0.5, area_thr=0.02, ori_img_size=ori_img_size,
+            gamma=0.5, area_thr=stal_area_thr, ori_img_size=ori_img_size,
         )
         # O2O assigner: topk=1, single best anchor per GT for NMS-free inference
         self.assigner_o2o = STALAssigner(
             topk=1, num_classes=num_classes,
             alpha=1.0, beta=6.0,
-            gamma=0.5, area_thr=0.02, ori_img_size=ori_img_size,
+            gamma=0.5, area_thr=stal_area_thr, ori_img_size=ori_img_size,
         )
 
         self.varifocal_loss = VarifocalLoss().cuda()
@@ -209,9 +213,6 @@ class ComputeLoss_O2O:
             target_bboxes  = target_bboxes.cuda()
             target_scores  = target_scores.cuda()
             fg_mask        = fg_mask.cuda()
-
-        if step_num % 10 == 0:
-            torch.cuda.empty_cache()
 
         # Rescale target bboxes to stride space (same scale as pred_bboxes)
         target_bboxes_s = target_bboxes / stride_tensor

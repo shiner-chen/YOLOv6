@@ -1,0 +1,13 @@
+# ARD100 roi200→640 dataset — 200x200 ROI upscaled to 640x640, train at 320x320
+# 路径: /home/adlink/data/ARD100_roi200_native_to640_v0  (SSD NVMe)
+# Train: 531197 张（负样本率约 20%）
+# Val:   105888 张
+# 目标尺寸 @320 input: p5=27px, median=93px, p95=167px
+
+train: /home/adlink/data/ARD100_roi200_native_to640_v0/images/train
+val:   /home/adlink/data/ARD100_roi200_native_to640_v0/images/val
+test:  /home/adlink/data/ARD100_roi200_native_to640_v0/images/test
+
+is_coco: False
+nc: 1
+names: ['drone']

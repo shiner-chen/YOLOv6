@@ -45,7 +45,7 @@ class Trainer:
         self.max_epoch = args.epochs
 
         if args.resume:
-            self.ckpt = torch.load(args.resume, map_location='cpu')
+            self.ckpt = torch.load(args.resume, map_location='cpu', weights_only=False)
 
         self.rank = args.rank
         self.local_rank = args.local_rank
@@ -316,6 +316,7 @@ class Trainer:
                 prog_loss_t1=getattr(self.cfg.model.head, 'prog_loss_t1', 50),
                 prog_loss_t2=getattr(self.cfg.model.head, 'prog_loss_t2', 150),
                 qat_mode=getattr(self.cfg.model.head, 'qat_mode', False),
+                stal_area_thr=getattr(self.cfg.model.head, 'stal_area_thr', 0.001),
             )
         else:
             self.compute_loss = ComputeLoss(num_classes=self.data_dict['nc'],

@@ -1,12 +1,20 @@
-# ET-YOLOv6n O2O fine-tune config
-# Loads backbone+neck from the single-branch ft1 checkpoint (strict=False, name+shape match).
-# O2O head is randomly initialised and trained from scratch via ProgLoss schedule.
+# ET-YOLOv6n O2O fine-tune config — ARD100_roi200_native_to640_v0
 #
-# ProgLoss schedule (fine-tune, epoch-budget compressed vs. scratch):
-#   epoch  <  20  :  λ_o2m=2.0, λ_o2o=1.0   (O2M-dominant, head warm-up)
-#   epoch  20- 80 :  linear transition
-#   epoch >  80   :  λ_o2m=1.0, λ_o2o=3.0   (O2O-dominant, NMS-free quality)
-#   → 100 epochs total: backbone already strong, 20 epochs O2O-dominant at end.
+# Dataset: 200x200 ROI region upscaled to 640x640, train at 320x320.
+#   Effective scale factor: 640/200 * (320/640) = 1.6x vs native.
+#   Target sizes @320 input: p5=27px, median=93px, p95=167px
+#   Negative ratio: ~20% (vs 66% in roi320) — model sees more positives
+#
+# Key differences from et_yolov6n_o2o_ft.py (roi320):
+#   stal_area_thr: 0.001 → 0.02  (27px→1.35x boost, 93px→1.01x, 167px→1.00x)
+#   prog_loss_t1:  20    → 15    (targets easier to assign, less O2M warm-up needed)
+#   prog_loss_t2:  80    → 65    (transition ends earlier, 15 epochs O2O-dominant)
+#   epochs:        100   → 80    (larger targets converge faster)
+#
+# ProgLoss schedule:
+#   epoch  <  15 : λ_o2m=2.0, λ_o2o=1.0  (O2M-dominant, head warm-up)
+#   epoch 15- 65 : linear transition
+#   epoch >  65  : λ_o2m=1.0, λ_o2o=3.0  (O2O-dominant, NMS-free quality)
 
 model = dict(
     type='ETYOLOv6n_O2O',
@@ -33,8 +41,9 @@ model = dict(
         iou_type='wiou',
         use_dfl=False,
         reg_max=0,
-        prog_loss_t1=20,
-        prog_loss_t2=80,
+        prog_loss_t1=15,
+        prog_loss_t2=65,
+        stal_area_thr=0.02,   # calibrated for 27-167px targets @320 input
         qat_mode=False,
         confidence_threshold=0.25,
     )
@@ -43,13 +52,13 @@ model = dict(
 solver = dict(
     optim='SGD',
     lr_scheduler='Cosine',
-    lr0=0.001,          # fix: 0.005→0.001; ft1收敛后骨干已稳定，0.005导致epoch14后振荡退化
+    lr0=0.001,
     lrf=0.01,
     momentum=0.937,
     weight_decay=0.0005,
-    warmup_epochs=3.0,  # fix: 1.0→3.0; O2O头随机初始化需要更长热身稳定梯度方向
+    warmup_epochs=3.0,
     warmup_momentum=0.8,
-    warmup_bias_lr=0.001,  # 与lr0匹配，避免热身期bias冲击已收敛的backbone
+    warmup_bias_lr=0.001,
 )
 
 training_mode = 'repvgg'
