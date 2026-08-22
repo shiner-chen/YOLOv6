@@ -7,7 +7,7 @@ import numpy as np
 import torch.nn.functional as F
 from yolov6.assigners.anchor_generator import generate_anchors
 from yolov6.utils.general import dist2bbox, bbox2dist, xywh2xyxy, box_iou
-from yolov6.utils.figure_iou import IOUloss
+from yolov6.utils.figure_iou import IOUloss, wasserstein_loss
 from yolov6.assigners.atss_assigner import ATSSAssigner
 from yolov6.assigners.tal_assigner import TaskAlignedAssigner
 
@@ -27,6 +27,8 @@ class ComputeLoss:
                      'class': 1.0,
                      'iou': 2.5,
                      'dfl': 0.5},
+                 nwd_ratio=0.0,
+                 nwd_constant=12.8,
                  ):
 
         self.fpn_strides = fpn_strides
@@ -45,8 +47,11 @@ class ComputeLoss:
         self.reg_max = reg_max
         self.proj = nn.Parameter(torch.linspace(0, self.reg_max, self.reg_max + 1), requires_grad=False)
         self.iou_type = iou_type
+        self.nwd_ratio = nwd_ratio
+        self.nwd_constant = nwd_constant
         self.varifocal_loss = VarifocalLoss().cuda()
-        self.bbox_loss = BboxLoss(self.num_classes, self.reg_max, self.use_dfl, self.iou_type).cuda()
+        self.bbox_loss = BboxLoss(self.num_classes, self.reg_max, self.use_dfl, self.iou_type,
+                                  nwd_ratio=nwd_ratio, nwd_constant=nwd_constant).cuda()
         self.loss_weight = loss_weight
 
     def __call__(
@@ -170,7 +175,7 @@ class ComputeLoss:
 
         # bbox loss
         loss_iou, loss_dfl = self.bbox_loss(pred_distri, pred_bboxes, anchor_points_s, target_bboxes,
-                                            target_scores, target_scores_sum, fg_mask)
+                                            target_scores, target_scores_sum, fg_mask, stride_tensor)
 
         loss = self.loss_weight['class'] * loss_cls + \
                self.loss_weight['iou'] * loss_iou + \
@@ -212,15 +217,19 @@ class VarifocalLoss(nn.Module):
 
 
 class BboxLoss(nn.Module):
-    def __init__(self, num_classes, reg_max, use_dfl=False, iou_type='giou'):
+    def __init__(self, num_classes, reg_max, use_dfl=False, iou_type='giou',
+                 nwd_ratio=0.0, nwd_constant=12.8):
         super(BboxLoss, self).__init__()
         self.num_classes = num_classes
         self.iou_loss = IOUloss(box_format='xyxy', iou_type=iou_type, eps=1e-10)
         self.reg_max = reg_max
         self.use_dfl = use_dfl
+        self.nwd_ratio = nwd_ratio       # blend: (1-r)*IoU + r*NWD
+        self.nwd_constant = nwd_constant
 
     def forward(self, pred_dist, pred_bboxes, anchor_points,
-                target_bboxes, target_scores, target_scores_sum, fg_mask):
+                target_bboxes, target_scores, target_scores_sum, fg_mask,
+                stride_tensor=None):
 
         # select positive samples mask
         num_pos = fg_mask.sum()
@@ -234,7 +243,19 @@ class BboxLoss(nn.Module):
             bbox_weight = torch.masked_select(
                 target_scores.sum(-1), fg_mask).unsqueeze(-1)
             loss_iou = self.iou_loss(pred_bboxes_pos,
-                                     target_bboxes_pos) * bbox_weight
+                                     target_bboxes_pos)
+
+            # NWD blend: (1-r)*IoU_loss + r*NWD_loss, computed in PIXEL space
+            if self.nwd_ratio > 0 and stride_tensor is not None:
+                stride_pos = torch.masked_select(
+                    stride_tensor.squeeze(-1).unsqueeze(0).repeat([fg_mask.shape[0], 1]),
+                    fg_mask).unsqueeze(-1)
+                loss_nwd = wasserstein_loss(pred_bboxes_pos * stride_pos,
+                                            target_bboxes_pos * stride_pos,
+                                            constant=self.nwd_constant).unsqueeze(-1)
+                loss_iou = (1.0 - self.nwd_ratio) * loss_iou + self.nwd_ratio * loss_nwd
+
+            loss_iou = loss_iou * bbox_weight
             if target_scores_sum > 1:
                 loss_iou = loss_iou.sum() / target_scores_sum
             else:

@@ -100,6 +100,44 @@ class IOUloss:
         return loss
 
 
+def wasserstein_loss(pred, target, constant=12.8, eps=1e-7):
+    """Normalized Wasserstein Distance (NWD) loss for tiny objects.
+
+    Models each box as a 2-D Gaussian N(mu, Sigma) with mu = (cx, cy) and
+    Sigma = diag((w/2)^2, (h/2)^2). The squared 2nd-order Wasserstein distance
+    between two such Gaussians reduces to a plain L2 distance over the vector
+    [cx, cy, w/2, h/2]. NWD = exp(-sqrt(W2^2)/C) is a similarity in (0,1] that,
+    unlike IoU, degrades smoothly under 1-2 px shifts on tiny targets.
+
+    Reference: "A Normalized Gaussian Wasserstein Distance for Tiny Object
+    Detection" (Wang et al., 2021), https://arxiv.org/abs/2110.13389
+
+    Args:
+        pred:   (Tensor[N, 4]) predicted boxes in xyxy, PIXEL coordinates.
+        target: (Tensor[N, 4]) target boxes in xyxy, PIXEL coordinates.
+        constant: (float) normalization constant C, ~ mean object size in px.
+        eps: (float) numerical stability.
+    Returns:
+        (Tensor[N]) NWD loss = 1 - NWD, one value per box pair.
+    """
+    cx_p = (pred[:, 0] + pred[:, 2]) * 0.5
+    cy_p = (pred[:, 1] + pred[:, 3]) * 0.5
+    w_p = (pred[:, 2] - pred[:, 0]).clamp(min=0)
+    h_p = (pred[:, 3] - pred[:, 1]).clamp(min=0)
+
+    cx_g = (target[:, 0] + target[:, 2]) * 0.5
+    cy_g = (target[:, 1] + target[:, 3]) * 0.5
+    w_g = (target[:, 2] - target[:, 0]).clamp(min=0)
+    h_g = (target[:, 3] - target[:, 1]).clamp(min=0)
+
+    center_dist = (cx_p - cx_g) ** 2 + (cy_p - cy_g) ** 2
+    wh_dist = ((w_p - w_g) ** 2 + (h_p - h_g) ** 2) / 4.0
+    w2 = center_dist + wh_dist  # squared Wasserstein distance
+
+    nwd = torch.exp(-torch.sqrt(w2 + eps) / constant)
+    return 1.0 - nwd
+
+
 def pairwise_bbox_iou(box1, box2, box_format='xywh'):
     """Calculate iou.
     This code is based on https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/utils/boxes.py

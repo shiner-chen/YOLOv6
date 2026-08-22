@@ -305,7 +305,9 @@ class Trainer:
                                         use_dfl=self.cfg.model.head.use_dfl,
                                         reg_max=self.cfg.model.head.reg_max,
                                         iou_type=self.cfg.model.head.iou_type,
-					                    fpn_strides=self.cfg.model.head.strides)
+					                    fpn_strides=self.cfg.model.head.strides,
+                                        nwd_ratio=getattr(self.cfg.model.head, 'nwd_ratio', 0.0),
+                                        nwd_constant=getattr(self.cfg.model.head, 'nwd_constant', 12.8))
 
         if self.args.fuse_ab:
             self.compute_loss_ab = ComputeLoss_ab(num_classes=self.data_dict['nc'],
