@@ -44,6 +44,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--gpu_count', type=int, default=0)
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume the most recent training')
+    parser.add_argument('--pretrain', type=str, default=None, help='path to pretrained weights for transfer learning (loads model weights only, not optimizer/scheduler)')
     parser.add_argument('--write_trainbatch_tb', action='store_true', help='write train_batch image to tensorboard once an epoch, may slightly slower train speed if open')
     parser.add_argument('--stop_aug_last_n_epoch', default=15, type=int, help='stop strong aug at last n epoch, neg value not stop, default 15')
     parser.add_argument('--save_ckpt_on_last_n_epoch', default=-1, type=int, help='save last n epoch even not best or last, neg value not save')
@@ -81,6 +82,16 @@ def check_and_init(args):
             LOGGER.warning(f'In this case, make sure to provide configuration, such as data, batch size.')
             args.save_dir = str(Path(checkpoint_path).parent.parent)
         args.resume = checkpoint_path  # set the args.resume to checkpoint path.
+    elif args.pretrain:
+        # Pretrain mode: load model weights only for transfer learning
+        checkpoint_path = args.pretrain
+        assert os.path.isfile(checkpoint_path), f'the pretrain checkpoint path does not exist: {checkpoint_path}'
+        LOGGER.info(f'Loading pretrained weights from: {checkpoint_path}')
+        LOGGER.info(f'Transfer learning mode: only model weights will be loaded (not optimizer/scheduler/epoch)')
+        args.pretrain = checkpoint_path  # set the args.pretrain to checkpoint path
+        args.save_dir = str(increment_name(osp.join(args.output_dir, args.name)))
+        if master_process:
+            os.makedirs(args.save_dir)
     else:
         args.save_dir = str(increment_name(osp.join(args.output_dir, args.name)))
         if master_process:

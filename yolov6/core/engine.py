@@ -45,6 +45,12 @@ class Trainer:
 
         if args.resume:
             self.ckpt = torch.load(args.resume, map_location='cpu', weights_only=False)
+            self.pretrain_mode = False  # Resume mode
+        elif args.pretrain:
+            self.ckpt = torch.load(args.pretrain, map_location='cpu', weights_only=False)
+            self.pretrain_mode = True  # Pretrain mode
+        else:
+            self.pretrain_mode = False
 
         self.rank = args.rank
         self.local_rank = args.local_rank
@@ -75,16 +81,27 @@ class Trainer:
         # tensorboard
         self.tblogger = SummaryWriter(self.save_dir) if self.main_process else None
         self.start_epoch = 0
-        #resume
+        #resume or pretrain
         if hasattr(self, "ckpt"):
             resume_state_dict = self.ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
             model.load_state_dict(resume_state_dict, strict=True)  # load
-            self.start_epoch = self.ckpt['epoch'] + 1
-            self.optimizer.load_state_dict(self.ckpt['optimizer'])
-            self.scheduler.load_state_dict(self.ckpt['scheduler'])
-            if self.main_process:
-                self.ema.ema.load_state_dict(self.ckpt['ema'].float().state_dict())
-                self.ema.updates = self.ckpt['updates']
+
+            if hasattr(self, 'pretrain_mode') and self.pretrain_mode:
+                # Pretrain mode: only load model weights, start from epoch 0
+                LOGGER.info('Pretrain mode: loaded model weights only, starting training from epoch 0')
+                self.start_epoch = 0
+            else:
+                # Resume mode: load everything
+                self.start_epoch = self.ckpt['epoch'] + 1
+                if self.ckpt.get('optimizer') is not None:
+                    self.optimizer.load_state_dict(self.ckpt['optimizer'])
+                if self.ckpt.get('scheduler') is not None:
+                    self.scheduler.load_state_dict(self.ckpt['scheduler'])
+                if self.main_process:
+                    if self.ckpt.get('ema') is not None:
+                        self.ema.ema.load_state_dict(self.ckpt['ema'].float().state_dict())
+                        self.ema.updates = self.ckpt.get('updates', 0)
+
             if self.start_epoch > (self.max_epoch - self.args.stop_aug_last_n_epoch):
                 self.cfg.data_aug.mosaic = 0.0
                 self.cfg.data_aug.mixup = 0.0
@@ -364,7 +381,7 @@ class Trainer:
         if self.main_process:
             LOGGER.info(f'\nTraining completed in {(time.time() - self.start_time) / 3600:.3f} hours.')
             save_ckpt_dir = osp.join(self.save_dir, 'weights')
-            strip_optimizer(save_ckpt_dir, self.epoch)  # strip optimizers for saved pt model
+            strip_optimizer(save_ckpt_dir, self.max_epoch - 1)  # strip optimizers for saved pt model
 
     # Empty cache if training finished
     def train_after_loop(self):
