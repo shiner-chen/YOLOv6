@@ -19,14 +19,14 @@
 #   torchrun --nproc_per_node=2 --master_port=29500 \
 #       tools/train.py \
 #       --conf configs/yolov6n_ard100_roi160_p2p3_nwd.py \
-#       --data data/ard100_roi160_merged.yaml \
+#       --data data/ard100_roi160_filtered.yaml \
 #       --img-size 160 \
 #       --batch-size 128 \
 #       --epochs 400 \
 #       --device 0,1 \
 #       --workers 4 \
 #       --output-dir runs/train \
-#       --name yolov6n_roi160_p2p3_nwd \
+#       --name yolov6n_roi160_p2p3_nwd_filtered \
 #       --eval-interval 5
 
 training_mode = 'repvgg'  # RepVGG training mode for reparameterization
@@ -67,14 +67,14 @@ model = dict(
         anchors=3,
 
         # Anchors for 160×160 input, 2-scale detection
-        # Based on ARD100 dataset statistics in ROI160
-        # Targets in ROI160 are LARGER than full-frame (tighter crop, not downscale)
-        # Expected target sizes: 8-40 pixels (avg ~20px)
-        # P2 (stride=4, 40×40): 4-20 pixels — primary for tiny targets
-        # P3 (stride=8, 20×20): 16-40 pixels — secondary for small targets
+        # Based on FILTERED dataset analysis (ard100_roi160_filtered):
+        # ARD100 (93%): max_edge 10-20px (57.4%), 20-30px (16.3%), <10px (11.5%)
+        # Diverse (7%):  max_edge 50-80px (66%)
+        # P2 (stride=4, 40×40): 4-30px — primary for ARD100 tiny targets
+        # P3 (stride=8, 20×20): 20-80px — ARD100 large + Diverse medium targets
         anchors_init=[
-            [6,4,   10,7,   15,10],     # P2: 4-20px tiny targets (primary)
-            [20,14, 28,20,  38,28]      # P3: 16-40px small targets (secondary)
+            [5,4,   12,8,   20,14],     # P2: geom_mean 4.5, 9.8, 16.7px
+            [24,16, 40,28,  64,48]      # P3: geom_mean 19.6, 33.5, 55.4px
         ],
 
         out_indices=[17, 20],          # *** 2 outputs: P2, P3 ***
@@ -86,11 +86,13 @@ model = dict(
         reg_max=0,
 
         # === NWD (Normalized Wasserstein Distance) Loss Settings ===
-        # ROI160 has LARGER targets than full-frame 640×640
-        # Measured from ARD100 ROI160: avg ~20×15 px, geometric mean ≈ 17.3
+        # Based on filtered dataset analysis (ard100_roi160_filtered):
+        # - ARD100 (93%): geometric mean 15.2px (train), 17.9px (val)
+        # - Diverse (7%):  geometric mean 42.2px (train), 41.0px (val)
+        # - Overall weighted: 17.6px → rounded to 18.0
         # Use higher NWD ratio for better tiny object localization
         nwd_ratio=0.6,             # 60% NWD + 40% SIoU (higher than 320's 0.5)
-        nwd_constant=17.0,         # ~sqrt(20*15) ≈ 17.3 (vs 320 ROI's 32.0)
+        nwd_constant=18.0,         # Based on filtered dataset: weighted geom_mean=17.6px
 
         distill_weight={
             'class': 1.0,
@@ -107,7 +109,7 @@ solver = dict(
     lrf=0.01,                  # Final lr = 0.005 * 0.01 = 0.00005
     momentum=0.937,
     weight_decay=0.0005,
-    warmup_epochs=3.0,
+    warmup_epochs=5.0,         # Increased from 3.0: small targets need longer warmup
     warmup_momentum=0.8,
     warmup_bias_lr=0.1,
 )
@@ -118,12 +120,12 @@ data_aug = dict(
     hsv_s=0.7,
     hsv_v=0.4,
     degrees=0.0,               # No rotation for Anti-UAV (upright targets)
-    translate=0.1,
-    scale=0.5,                 # Scale jitter for 160×160
+    translate=0.15,            # Increased from 0.1: adapt to motion-guided ROI crop errors
+    scale=0.2,                 # Reduced from 0.5 to 0.2: ROI scene needs conservative scale range
     shear=0.0,
     flipud=0.0,                # No vertical flip for Anti-UAV
     fliplr=0.5,                # 50% horizontal flip
-    mosaic=1.0,                # Always use mosaic augmentation
+    mosaic=0.0,                # Disabled: ROI is motion-guided crop, mosaic breaks semantics
     mixup=0.0,                 # No mixup (better for small targets)
 )
 
@@ -131,9 +133,15 @@ data_aug = dict(
 # 1. Epochs: 400 (same as ET-YOLO ROI160, smaller input needs more iterations)
 # 2. Batch size: 128 (2 GPUs × 64 per GPU)
 # 3. Image size: 160×160
-# 4. Dataset: ard100_roi160_merged.yaml
+# 4. Dataset: ard100_roi160_filtered.yaml (Diverse >80px filtered out)
 # 5. Evaluation interval: 5 epochs
 # 6. Expected training time: ~8-10 hours on 2×RTX 3090
+#
+# Configuration optimizations for filtered dataset:
+# - nwd_constant: 18.0 (based on weighted geom_mean=17.6px)
+# - anchors: optimized for ARD100 4-30px + Diverse 50-80px distribution
+# - warmup_epochs: 5.0 (longer warmup for small target stability)
+# - translate: 0.15 (adapt to motion-guided ROI crop errors)
 #
 # Performance expectations:
 # - FLOPs: ~0.3-0.5 GFLOPs (vs 1.2G for 320 3-scale, 4.5G for 640 full)
