@@ -9,6 +9,7 @@ from yolov6.utils.general import dist2bbox
 
 class Detect(nn.Module):
     export = False
+    raw_split_export = False   # NEW: output raw per-scale (reg, cls_logit) for split RKNN
     '''Efficient Decoupled Head
     With hardware-aware degisn, the decoupled head is optimized with
     hybridchannels methods.
@@ -110,6 +111,13 @@ class Detect(nn.Module):
                 reg_feat = self.reg_convs[i](reg_x)
                 reg_output = self.reg_preds[i](reg_feat)
 
+                # raw_split_export: return pre-sigmoid cls logits + raw reg per scale.
+                # Sigmoid and decode are done in float on the host → avoids INT8
+                # output quantisation collapsing the confidence distribution.
+                if self.raw_split_export:
+                    cls_score_list.append(cls_output)   # (1, nc, H, W) logits
+                    reg_dist_list.append(reg_output)    # (1, 4,  H, W) raw reg
+                    continue
                 if self.use_dfl:
                     reg_output = reg_output.reshape([-1, 4, self.reg_max + 1, l]).permute(0, 2, 1, 3)
                     reg_output = self.proj_conv(F.softmax(reg_output, dim=1))
@@ -122,6 +130,14 @@ class Detect(nn.Module):
                 else:
                     cls_score_list.append(cls_output.reshape([b, self.nc, l]))
                     reg_dist_list.append(reg_output.reshape([b, 4, l]))
+
+            # raw_split_export: single output (1, 5, N) = concat(cls_logit, reg_raw)
+            # Device splits: out[:,0:1,:]=cls_logits(pre-sigmoid), out[:,1:5,:]=reg_raw
+            # Single tensor avoids ONNX multi-output tracing issues.
+            if self.raw_split_export:
+                all_cls = torch.cat([c.reshape(b, self.nc, -1) for c in cls_score_list], dim=2)
+                all_reg = torch.cat([r.reshape(b, 4, -1) for r in reg_dist_list], dim=2)
+                return torch.cat([all_cls, all_reg], dim=1)  # (1, nc+4, 8500)
 
             if self.export:
                 return tuple(torch.cat([cls, reg], 1) for cls, reg in zip(cls_score_list, reg_dist_list))
