@@ -1,0 +1,17 @@
+# ARD100 ROI160 dataset configuration (merged with diverse data)
+# 160×160 ROI patches + diverse drone dataset
+
+# Dataset paths (absolute)
+train: /home/adlink/data/ARD100_roi160/images/train
+val: /home/adlink/data/ARD100_roi160/images/val
+
+# Class names
+names: ['drone']
+
+# Number of classes
+nc: 1
+
+# Dataset info
+# - ROI size: 160×160 pixels
+# - Merged with diverse drone dataset for better generalization
+# - Average target size in ROI: ~39×24 pixels (geometric mean ≈ 30.8)

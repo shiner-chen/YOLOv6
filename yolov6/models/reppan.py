@@ -1224,3 +1224,141 @@ class Lite_EffiNeck(nn.Module):
         outputs = [pan_out3, pan_out2, pan_out1, pan_out0]
 
         return outputs
+
+
+class RepBiFPANNeckP2P3(nn.Module):
+    """RepBiFPANNeck with P2+P3 outputs only
+
+    For 160x160 ROI micro-object detection.
+    Architecture: Keep FULL backbone/neck for semantic features, output P2+P3 only.
+
+    Input from backbone (when fuse_P2=True):
+        x3: P2 (C2, stride=4)
+        x2: P3 (C3, stride=8)
+        x1: P4 (C4, stride=16)
+        x0: P5 (C5, stride=32)
+
+    Output to detection heads:
+        pan_out_p2: P2 output (stride=4, 40x40 @ 160x160 input)
+        pan_out_p3: P3 output (stride=8, 20x20 @ 160x160 input)
+
+    Channel layout (width_multiple=0.25 for nano):
+        Backbone: [64, 128, 256, 512, 1024] -> [16, 32, 64, 128, 256]
+        Neck:     [256, 128, 128, 256, 256, 512] -> [64, 32, 32, 64, 64, 128]
+        indices:  [5,   6,   7,   8,   9,   10]
+    """
+
+    def __init__(
+        self,
+        channels_list=None,
+        num_repeats=None,
+        block=RepVGGBlock
+    ):
+        super().__init__()
+
+        assert channels_list is not None
+        assert num_repeats is not None
+
+        # Top-down FPN path (keep FULL to extract deep semantics)
+        # P5 -> P4
+        self.reduce_layer0 = ConvBNReLU(
+            in_channels=channels_list[4],   # C5: 1024 -> 256 (nano)
+            out_channels=channels_list[5],  # 256 -> 64 (nano)
+            kernel_size=1,
+            stride=1
+        )
+
+        self.Bifusion0 = BiFusion(
+            in_channels=[channels_list[3], channels_list[2]],  # C4:512, C3:256
+            out_channels=channels_list[5],  # 256 -> 64 (nano)
+        )
+
+        self.Rep_p4 = RepBlock(
+            in_channels=channels_list[5],   # 256 -> 64 (nano)
+            out_channels=channels_list[5],  # 256 -> 64 (nano)
+            n=num_repeats[5],
+            block=block
+        )
+
+        # P4 -> P3
+        self.reduce_layer1 = ConvBNReLU(
+            in_channels=channels_list[5],   # 256 -> 64 (nano)
+            out_channels=channels_list[6],  # 128 -> 32 (nano)
+            kernel_size=1,
+            stride=1
+        )
+
+        self.Bifusion1 = BiFusion(
+            in_channels=[channels_list[2], channels_list[1]],  # C3:256, C2:128
+            out_channels=channels_list[6],  # 128 -> 32 (nano)
+        )
+
+        self.Rep_p3 = RepBlock(
+            in_channels=channels_list[6],   # 128 -> 32 (nano)
+            out_channels=channels_list[6],  # 128 -> 32 (nano)
+            n=num_repeats[6],
+            block=block
+        )
+
+        # P3 -> P2 (extra branch for tiny objects)
+        self.upsample_p2 = Transpose(
+            in_channels=channels_list[6],   # 128 -> 32 (nano)
+            out_channels=channels_list[7],  # 128 -> 32 (nano)
+        )
+
+        self.Rep_p2 = RepBlock(
+            in_channels=channels_list[1] + channels_list[7],  # C2 + upsample: 128+128 -> 32+32
+            out_channels=channels_list[7],  # 128 -> 32 (nano) - P2 output
+            n=num_repeats[6],  # reuse p3 repeat count
+            block=block
+        )
+
+        # Bottom-up PAN path (for feature refinement)
+        # P2 -> P3
+        self.downsample_p3 = ConvBNReLU(
+            in_channels=channels_list[7],   # P2: 128 -> 32 (nano)
+            out_channels=channels_list[7],  # 128 -> 32 (nano)
+            kernel_size=3,
+            stride=2
+        )
+
+        self.Rep_n3 = RepBlock(
+            in_channels=channels_list[6] + channels_list[7],  # fpn_p3 + down_p2: 128+128
+            out_channels=channels_list[8],  # 256 -> 64 (nano) - P3 output
+            n=num_repeats[7],
+            block=block
+        )
+
+    def forward(self, input):
+        """
+        Args:
+            input: tuple of (P2, P3, P4, P5) from backbone
+
+        Returns:
+            list: [P2_out, P3_out] for detection heads
+        """
+        (x3, x2, x1, x0) = input  # P2, P3, P4, P5
+
+        # Top-down FPN
+        fpn_out0 = self.reduce_layer0(x0)  # P5 reduce
+        f_concat_layer0 = self.Bifusion0([fpn_out0, x1, x2])  # Fuse P5->P4->P3
+        f_out0 = self.Rep_p4(f_concat_layer0)  # P4 level features
+
+        fpn_out1 = self.reduce_layer1(f_out0)  # P4 reduce
+        f_concat_layer1 = self.Bifusion1([fpn_out1, x2, x3])  # Fuse P4->P3->P2
+        fpn_out_p3 = self.Rep_p3(f_concat_layer1)  # P3 level features
+
+        # P3 -> P2
+        up_feat_p2 = self.upsample_p2(fpn_out_p3)
+        p2_concat = torch.cat([up_feat_p2, x3], 1)  # Concat with backbone P2
+        fpn_out_p2 = self.Rep_p2(p2_concat)  # P2 level features
+
+        # Bottom-up PAN (refine with deeper features)
+        down_feat_p3 = self.downsample_p3(fpn_out_p2)  # P2 -> P3
+        p3_concat = torch.cat([down_feat_p3, fpn_out_p3], 1)
+        pan_out_p3 = self.Rep_n3(p3_concat)  # Final P3 output
+
+        # Return P2 first (finest scale first)
+        outputs = [fpn_out_p2, pan_out_p3]
+
+        return outputs

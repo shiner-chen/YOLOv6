@@ -227,7 +227,10 @@ class Trainer:
                     }
 
             save_ckpt_dir = osp.join(self.save_dir, 'weights')
-            save_checkpoint(ckpt, (is_val_epoch) and (self.ap == self.best_ap), save_ckpt_dir, model_name='last_ckpt')
+            is_best = (is_val_epoch) and (self.ap == self.best_ap)
+            if is_val_epoch:
+                LOGGER.info(f"[DEBUG] Epoch {self.epoch}: is_val_epoch={is_val_epoch}, self.ap={self.ap:.6f}, self.best_ap={self.best_ap:.6f}, is_best={is_best}")
+            save_checkpoint(ckpt, is_best, save_ckpt_dir, model_name='last_ckpt')
             if self.epoch >= self.max_epoch - self.args.save_ckpt_on_last_n_epoch:
                 save_checkpoint(ckpt, False, save_ckpt_dir, model_name=f'{self.epoch}_ckpt')
 
@@ -309,8 +312,8 @@ class Trainer:
         self.best_ap, self.ap = 0.0, 0.0
         self.best_stop_strong_aug_ap = 0.0
         self.evaluate_results = (0, 0) # AP50, AP50_95
-        # resume results
-        if hasattr(self, "ckpt"):
+        # resume results (only for --resume, not for --pretrain)
+        if hasattr(self, "ckpt") and not self.pretrain_mode:
             self.evaluate_results = self.ckpt['results']
             self.best_ap = self.evaluate_results[1]
             self.best_stop_strong_aug_ap = self.evaluate_results[1]

@@ -22,7 +22,9 @@ class Detect(nn.Module):
         self.grid = [torch.zeros(1)] * num_layers
         self.prior_prob = 1e-2
         self.inplace = inplace
-        if num_layers == 3:
+        if num_layers == 2:
+            stride = [4, 8]           # P2/P3 only (ROI160 2-head)
+        elif num_layers == 3:
             stride = [8, 16, 32]
         elif p2_head:
             stride = [4, 8, 16, 32]   # ET-YOLOv6n P2/P3/P4/P5
@@ -146,114 +148,62 @@ class Detect(nn.Module):
 
 def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, num_layers=3, p2_head=False):
 
-    if num_layers == 3:
+    if num_layers == 2:
+        chx = [7, 8]          # YOLOv6n P2/P3 2-head: P2_out(ch[7]=128), P3_out(ch[8]=256)
+    elif num_layers == 3:
         chx = [6, 8, 10]
     elif p2_head:
         chx = [12, 6, 8, 10]  # ET-YOLOv6n: P2(/4), P3(/8), P4(/16), P5(/32)
     else:
         chx = [8, 9, 10, 11]  # P6 variant
 
-    head_layers = nn.Sequential(
-        # stem0
-        ConvBNSiLU(
-            in_channels=channels_list[chx[0]],
-            out_channels=channels_list[chx[0]],
-            kernel_size=1,
-            stride=1
-        ),
-        # cls_conv0
-        ConvBNSiLU(
-            in_channels=channels_list[chx[0]],
-            out_channels=channels_list[chx[0]],
-            kernel_size=3,
-            stride=1
-        ),
-        # reg_conv0
-        ConvBNSiLU(
-            in_channels=channels_list[chx[0]],
-            out_channels=channels_list[chx[0]],
-            kernel_size=3,
-            stride=1
-        ),
-        # cls_pred0
-        nn.Conv2d(
-            in_channels=channels_list[chx[0]],
-            out_channels=num_classes * num_anchors,
-            kernel_size=1
-        ),
-        # reg_pred0
-        nn.Conv2d(
-            in_channels=channels_list[chx[0]],
-            out_channels=4 * (reg_max + num_anchors),
-            kernel_size=1
-        ),
-        # stem1
-        ConvBNSiLU(
-            in_channels=channels_list[chx[1]],
-            out_channels=channels_list[chx[1]],
-            kernel_size=1,
-            stride=1
-        ),
-        # cls_conv1
-        ConvBNSiLU(
-            in_channels=channels_list[chx[1]],
-            out_channels=channels_list[chx[1]],
-            kernel_size=3,
-            stride=1
-        ),
-        # reg_conv1
-        ConvBNSiLU(
-            in_channels=channels_list[chx[1]],
-            out_channels=channels_list[chx[1]],
-            kernel_size=3,
-            stride=1
-        ),
-        # cls_pred1
-        nn.Conv2d(
-            in_channels=channels_list[chx[1]],
-            out_channels=num_classes * num_anchors,
-            kernel_size=1
-        ),
-        # reg_pred1
-        nn.Conv2d(
-            in_channels=channels_list[chx[1]],
-            out_channels=4 * (reg_max + num_anchors),
-            kernel_size=1
-        ),
-        # stem2
-        ConvBNSiLU(
-            in_channels=channels_list[chx[2]],
-            out_channels=channels_list[chx[2]],
-            kernel_size=1,
-            stride=1
-        ),
-        # cls_conv2
-        ConvBNSiLU(
-            in_channels=channels_list[chx[2]],
-            out_channels=channels_list[chx[2]],
-            kernel_size=3,
-            stride=1
-        ),
-        # reg_conv2
-        ConvBNSiLU(
-            in_channels=channels_list[chx[2]],
-            out_channels=channels_list[chx[2]],
-            kernel_size=3,
-            stride=1
-        ),
-        # cls_pred2
-        nn.Conv2d(
-            in_channels=channels_list[chx[2]],
-            out_channels=num_classes * num_anchors,
-            kernel_size=1
-        ),
-        # reg_pred2
-        nn.Conv2d(
-            in_channels=channels_list[chx[2]],
-            out_channels=4 * (reg_max + num_anchors),
-            kernel_size=1
+    head_layers = nn.Sequential()
+
+    # Build head layers dynamically based on num_layers
+    for i in range(num_layers):
+        # stem
+        head_layers.add_module(f'stem{i}',
+            ConvBNSiLU(
+                in_channels=channels_list[chx[i]],
+                out_channels=channels_list[chx[i]],
+                kernel_size=1,
+                stride=1
+            )
         )
-    )
+        # cls_conv
+        head_layers.add_module(f'cls_conv{i}',
+            ConvBNSiLU(
+                in_channels=channels_list[chx[i]],
+                out_channels=channels_list[chx[i]],
+                kernel_size=3,
+                stride=1
+            )
+        )
+        # reg_conv
+        head_layers.add_module(f'reg_conv{i}',
+            ConvBNSiLU(
+                in_channels=channels_list[chx[i]],
+                out_channels=channels_list[chx[i]],
+                kernel_size=3,
+                stride=1
+            )
+        )
+        # cls_pred
+        head_layers.add_module(f'cls_pred{i}',
+            nn.Conv2d(
+                in_channels=channels_list[chx[i]],
+                out_channels=num_classes * num_anchors,
+                kernel_size=1
+            )
+        )
+        # reg_pred
+        head_layers.add_module(f'reg_pred{i}',
+            nn.Conv2d(
+                in_channels=channels_list[chx[i]],
+                out_channels=4 * (reg_max + num_anchors),
+                kernel_size=1
+            )
+        )
 
     if num_layers == 4:
         head_layers.add_module('stem3',

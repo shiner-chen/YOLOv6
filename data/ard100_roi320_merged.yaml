@@ -1,0 +1,22 @@
+# ARD100 320×320 ROI-crop + Diverse Drone Dataset (MERGED, FILTERED)
+# Original ROI320: stride=20  seed=42
+# ROI=320  margin=32  vis_thresh=0.7
+# neg_per_pos=6  neg_no_overlap=True
+#
+# Diverse dataset: letterbox resized to 320×320, filtered to keep 40-120px targets only
+# train: ARD100 35,850 + diverse filtered 400 (22.3% kept) = 36,250 images
+# val:   ARD100  9,372 + diverse filtered  66 (20.9% kept) =  9,438 images
+# test:  pure ARD100 (no diverse)
+#
+# Target distribution:
+#   - ARD100 (98.9%): avg 15.3px (tiny targets, 10-30px range)
+#   - Diverse (1.1%): 40-120px (medium targets, filtered)
+
+# Dataset paths (absolute)
+train: /home/adlink/data/ARD100_roi320/images/train
+val: /home/adlink/data/ARD100_roi320/images/val
+test: /home/adlink/data/ARD100_roi320/images/test
+
+is_coco: False
+nc: 1
+names: ['drone']

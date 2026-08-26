@@ -1,0 +1,18 @@
+# ARD100 160×160 ROI-crop + Diverse Drone Dataset (MERGED)
+# Original ROI160: stride=20  seed=42
+# ROI=160  margin=16  vis_thresh=0.7
+# neg_per_pos=6  neg_no_overlap=True
+#
+# Diverse dataset: letterbox resized to 160×160
+# train diverse: 1797 images
+# val diverse: 316 images
+# test: pure ARD100 (no diverse)
+
+# Dataset paths (absolute)
+train: /home/adlink/data/ARD100_roi160/images/train
+val: /home/adlink/data/ARD100_roi160/images/val
+test: /home/adlink/data/ARD100_roi160/images/test
+
+is_coco: False
+nc: 1
+names: ['drone']
