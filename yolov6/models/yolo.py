@@ -130,8 +130,9 @@ def build_network(config, channels, num_classes, num_layers, fuse_ab=False, dist
     else:
         from yolov6.models.effidehead import Detect, build_effidehead_layer
         p2_head = config.model.head.get('p2_head', False)
+        in_channels = config.model.head.get('in_channels', None)
         head_layers = build_effidehead_layer(channels_list, 1, num_classes, reg_max=reg_max,
-                                             num_layers=num_layers, p2_head=p2_head)
+                                             num_layers=num_layers, p2_head=p2_head, in_channels=in_channels)
         head = Detect(num_classes, num_layers, head_layers=head_layers, use_dfl=use_dfl,
                       p2_head=p2_head)
 
