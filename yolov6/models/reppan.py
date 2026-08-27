@@ -1362,3 +1362,183 @@ class RepBiFPANNeckP2P3(nn.Module):
         outputs = [fpn_out_p2, pan_out_p3]
 
         return outputs
+
+
+class RepBiFPANNeckP2P3P4P5(nn.Module):
+    """RepBiFPANNeck with P2/P3/P4/P5 outputs (4-scale detection)
+
+    Original YOLOv6n RepBiFPANNeck architecture extended with P2 head support.
+    For 320x320 input with full range detection (15-180px targets).
+
+    Input from backbone (when fuse_P2=True):
+        x3: P2 (C2, stride=4)
+        x2: P3 (C3, stride=8)
+        x1: P4 (C4, stride=16)
+        x0: P5 (C5, stride=32)
+
+    Output to detection heads:
+        [P2_out, P3_out, P4_out, P5_out]
+        - P2_out: stride=4 (80x80 @ 320x320 input) for 15-40px targets
+        - P3_out: stride=8 (40x40 @ 320x320 input) for 40-90px targets
+        - P4_out: stride=16 (20x20 @ 320x320 input) for 80-160px targets
+        - P5_out: stride=32 (10x10 @ 320x320 input) for 140-220px targets
+
+    Channel layout (width_multiple=0.25 for nano):
+        Backbone: [64, 128, 256, 512, 1024] -> [16, 32, 64, 128, 256]
+        Neck out_channels: [256, 128, 128, 256, 256, 512, 128, 128, 256, 256, 512]
+        indices:           [5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15]
+    """
+
+    def __init__(
+        self,
+        channels_list=None,
+        num_repeats=None,
+        block=RepVGGBlock
+    ):
+        super().__init__()
+
+        assert channels_list is not None
+        assert num_repeats is not None
+
+        # Top-down FPN: P5 -> P4 -> P3 -> P2
+
+        # P5 -> P4
+        self.reduce_layer0 = ConvBNReLU(
+            in_channels=channels_list[4],
+            out_channels=channels_list[5],
+            kernel_size=1,
+            stride=1
+        )
+
+        self.Bifusion0 = BiFusion(
+            in_channels=[channels_list[3], channels_list[2]],
+            out_channels=channels_list[5],
+        )
+
+        self.Rep_p4 = RepBlock(
+            in_channels=channels_list[5],
+            out_channels=channels_list[5],
+            n=num_repeats[5],
+            block=block
+        )
+
+        # P4 -> P3
+        self.reduce_layer1 = ConvBNReLU(
+            in_channels=channels_list[5],
+            out_channels=channels_list[6],
+            kernel_size=1,
+            stride=1
+        )
+
+        self.Bifusion1 = BiFusion(
+            in_channels=[channels_list[2], channels_list[1]],
+            out_channels=channels_list[6],
+        )
+
+        self.Rep_p3 = RepBlock(
+            in_channels=channels_list[6],
+            out_channels=channels_list[6],
+            n=num_repeats[6],
+            block=block
+        )
+
+        # P3 -> P2 (NEW: extend to P2)
+        self.upsample_p2 = Transpose(
+            in_channels=channels_list[6],
+            out_channels=channels_list[11],
+        )
+
+        self.Rep_p2 = RepBlock(
+            in_channels=channels_list[1] + channels_list[11],
+            out_channels=channels_list[11],
+            n=num_repeats[6],
+            block=block
+        )
+
+        # Bottom-up PAN: P2 -> P3 -> P4 -> P5
+
+        # P2 -> P3 (NEW)
+        self.downsample_p3 = ConvBNReLU(
+            in_channels=channels_list[11],
+            out_channels=channels_list[12],
+            kernel_size=3,
+            stride=2
+        )
+
+        self.Rep_n3 = RepBlock(
+            in_channels=channels_list[6] + channels_list[12],
+            out_channels=channels_list[8],
+            n=num_repeats[7],
+            block=block
+        )
+
+        # P3 -> P4
+        self.downsample_p4 = ConvBNReLU(
+            in_channels=channels_list[8],
+            out_channels=channels_list[9],
+            kernel_size=3,
+            stride=2
+        )
+
+        self.Rep_n4 = RepBlock(
+            in_channels=channels_list[5] + channels_list[9],
+            out_channels=channels_list[13],
+            n=num_repeats[8],
+            block=block
+        )
+
+        # P4 -> P5
+        self.downsample_p5 = ConvBNReLU(
+            in_channels=channels_list[13],
+            out_channels=channels_list[14],
+            kernel_size=3,
+            stride=2
+        )
+
+        self.Rep_n5 = RepBlock(
+            in_channels=channels_list[5] + channels_list[14],
+            out_channels=channels_list[10],
+            n=num_repeats[8],
+            block=block
+        )
+
+    def forward(self, input):
+        """
+        Args:
+            input: tuple of (P2, P3, P4, P5) from backbone
+
+        Returns:
+            list: [P2_out, P3_out, P4_out, P5_out] for 4-scale detection heads
+        """
+        (x3, x2, x1, x0) = input  # P2, P3, P4, P5
+
+        # Top-down FPN
+        fpn_out0 = self.reduce_layer0(x0)
+        f_concat_layer0 = self.Bifusion0([fpn_out0, x1, x2])
+        fpn_out_p4 = self.Rep_p4(f_concat_layer0)
+
+        fpn_out1 = self.reduce_layer1(fpn_out_p4)
+        f_concat_layer1 = self.Bifusion1([fpn_out1, x2, x3])
+        fpn_out_p3 = self.Rep_p3(f_concat_layer1)
+
+        up_feat_p2 = self.upsample_p2(fpn_out_p3)
+        p2_concat = torch.cat([up_feat_p2, x3], 1)
+        fpn_out_p2 = self.Rep_p2(p2_concat)
+
+        # Bottom-up PAN
+        down_feat_p3 = self.downsample_p3(fpn_out_p2)
+        p3_concat = torch.cat([down_feat_p3, fpn_out_p3], 1)
+        pan_out_p3 = self.Rep_n3(p3_concat)
+
+        down_feat_p4 = self.downsample_p4(pan_out_p3)
+        p4_concat = torch.cat([down_feat_p4, fpn_out_p4], 1)
+        pan_out_p4 = self.Rep_n4(p4_concat)
+
+        down_feat_p5 = self.downsample_p5(pan_out_p4)
+        p5_concat = torch.cat([down_feat_p5, fpn_out0], 1)
+        pan_out_p5 = self.Rep_n5(p5_concat)
+
+        # Return 4 outputs: [P2, P3, P4, P5]
+        outputs = [fpn_out_p2, pan_out_p3, pan_out_p4, pan_out_p5]
+
+        return outputs

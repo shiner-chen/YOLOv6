@@ -146,14 +146,17 @@ class Detect(nn.Module):
                 axis=-1)
 
 
-def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, num_layers=3, p2_head=False):
+def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, num_layers=3, p2_head=False, in_channels=None):
 
-    if num_layers == 2:
+    if in_channels is not None:
+        # Use explicit in_channels when provided (for custom neck architectures)
+        chx = None
+    elif num_layers == 2:
         chx = [7, 8]          # YOLOv6n P2/P3 2-head: P2_out(ch[7]=128), P3_out(ch[8]=256)
     elif num_layers == 3:
         chx = [6, 8, 10]
     elif p2_head:
-        chx = [12, 6, 8, 10]  # ET-YOLOv6n: P2(/4), P3(/8), P4(/16), P5(/32)
+        chx = [12, 6, 8, 10]  # ET-YOLOv6n (CrossTwoLevelBiFPANNeck): P2(/4), P3(/8), P4(/16), P5(/32)
     else:
         chx = [8, 9, 10, 11]  # P6 variant
 
@@ -161,11 +164,17 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
 
     # Build head layers dynamically based on num_layers
     for i in range(num_layers):
+        # Get input channel for this layer
+        if in_channels is not None:
+            in_ch = in_channels[i]
+        else:
+            in_ch = channels_list[chx[i]]
+
         # stem
         head_layers.add_module(f'stem{i}',
             ConvBNSiLU(
-                in_channels=channels_list[chx[i]],
-                out_channels=channels_list[chx[i]],
+                in_channels=in_ch,
+                out_channels=in_ch,
                 kernel_size=1,
                 stride=1
             )
@@ -173,8 +182,8 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         # cls_conv
         head_layers.add_module(f'cls_conv{i}',
             ConvBNSiLU(
-                in_channels=channels_list[chx[i]],
-                out_channels=channels_list[chx[i]],
+                in_channels=in_ch,
+                out_channels=in_ch,
                 kernel_size=3,
                 stride=1
             )
@@ -182,8 +191,8 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         # reg_conv
         head_layers.add_module(f'reg_conv{i}',
             ConvBNSiLU(
-                in_channels=channels_list[chx[i]],
-                out_channels=channels_list[chx[i]],
+                in_channels=in_ch,
+                out_channels=in_ch,
                 kernel_size=3,
                 stride=1
             )
@@ -191,7 +200,7 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         # cls_pred
         head_layers.add_module(f'cls_pred{i}',
             nn.Conv2d(
-                in_channels=channels_list[chx[i]],
+                in_channels=in_ch,
                 out_channels=num_classes * num_anchors,
                 kernel_size=1
             )
@@ -199,18 +208,24 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         # reg_pred
         head_layers.add_module(f'reg_pred{i}',
             nn.Conv2d(
-                in_channels=channels_list[chx[i]],
+                in_channels=in_ch,
                 out_channels=4 * (reg_max + num_anchors),
                 kernel_size=1
             )
         )
 
     if num_layers == 4:
+        # Get input channel for 4th layer (P5)
+        if in_channels is not None:
+            in_ch_p5 = in_channels[3]
+        else:
+            in_ch_p5 = channels_list[chx[3]]
+
         head_layers.add_module('stem3',
             # stem3
             ConvBNSiLU(
-                in_channels=channels_list[chx[3]],
-                out_channels=channels_list[chx[3]],
+                in_channels=in_ch_p5,
+                out_channels=in_ch_p5,
                 kernel_size=1,
                 stride=1
             )
@@ -218,8 +233,8 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         head_layers.add_module('cls_conv3',
             # cls_conv3
             ConvBNSiLU(
-                in_channels=channels_list[chx[3]],
-                out_channels=channels_list[chx[3]],
+                in_channels=in_ch_p5,
+                out_channels=in_ch_p5,
                 kernel_size=3,
                 stride=1
             )
@@ -227,8 +242,8 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         head_layers.add_module('reg_conv3',
             # reg_conv3
             ConvBNSiLU(
-                in_channels=channels_list[chx[3]],
-                out_channels=channels_list[chx[3]],
+                in_channels=in_ch_p5,
+                out_channels=in_ch_p5,
                 kernel_size=3,
                 stride=1
             )
@@ -236,7 +251,7 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         head_layers.add_module('cls_pred3',
             # cls_pred3
             nn.Conv2d(
-                in_channels=channels_list[chx[3]],
+                in_channels=in_ch_p5,
                 out_channels=num_classes * num_anchors,
                 kernel_size=1
             )
@@ -244,7 +259,7 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
         head_layers.add_module('reg_pred3',
             # reg_pred3
             nn.Conv2d(
-                in_channels=channels_list[chx[3]],
+                in_channels=in_ch_p5,
                 out_channels=4 * (reg_max + num_anchors),
                 kernel_size=1
             )
